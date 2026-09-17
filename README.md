@@ -1,12 +1,21 @@
-# MALLEUS RPG
+# MALLEUS — Oficio
 
-Prototipo de acción RPG (cámara cenital).
+Prototipo de RPG de acción 2D (canvas, vanilla JS, sin frameworks ni build step)
+ambientado en una cacería de brujas de inspiración inquisitorial.
 
-## Jugar
+Jugalo abriendo `index.html` en un navegador (hace falta la carpeta `assets`).
 
-Hace falta `game.js` y la carpeta `assets` junto a `index.html`.
-Abrí `index.html` en el navegador.
+## Controles
 
-WASD mover · clic izquierdo martillo · clic derecho objeto
+WASD mover · clic izquierdo martillo · clic derecho objeto · rueda cambia objeto
 
-https://github.com/cabbarto/malleus-rpg
+## Estructura
+
+```
+index.html
+src/game.js
+assets/
+docs/STORY.md
+docs/ARCHITECTURE.md
+ROADMAP.md
+```
