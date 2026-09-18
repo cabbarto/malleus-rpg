@@ -17,6 +17,7 @@ Jugalo abriendo `index.html` en un navegador (no necesita servidor ni build).
 | Usar objeto equipado | clic derecho / X / K | botón 🕯 |
 | Hablar / abrir | clic cerca / C | botón HABLAR |
 | Cambiar objeto | rueda del mouse / teclas 1-2-3 | tocar el ícono en el HUD arriba |
+| Pausar | P / Escape | botón ❚❚ arriba a la derecha |
 | Cerrar diálogo o cutscene | clic / Z / Enter | botón ⚒ |
 
 El juego detecta solo si es celular o desktop (`IS_TOUCH` en `src/game.js`,
@@ -90,6 +91,15 @@ Implementado:
 
 Pendiente (ver `ROADMAP.md`): pantallas de final más distinguibles
 visualmente, expansión a más pueblos, sistema de guardado.
+
+## Estado del arte (actualizado 18/9)
+
+Todo el lote de `docs/ART_TODO.md` ya está integrado: caminata real en las
+3 direcciones, sprites de ataque dedicados, Encapuchado y Padre con sprite
+propio (ya no siluetas vectoriales), y las 2 ilustraciones de final. Quedan
+sin usar todavía (guardados en `assets/` para cuando lleguen esas fases del
+roadmap): `knight.png` y `bowman.png` (compañeros, Fase 4) y `grass.png`
+(decoración suelta — no se llegó a integrar en esta pasada).
 
 ## Estructura del repo
 

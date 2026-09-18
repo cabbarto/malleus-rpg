@@ -2,6 +2,15 @@
   const HUD = 52, VW = 960, VH = 540;
   const canvas = document.getElementById("c");
   const ctx = canvas.getContext("2d");
+  // Buffer aparte para el "rim light" del jugador en salas oscuras (ver uso
+  // en draw(), busqueda "rim-light"). Necesita ser un canvas propio porque
+  // "source-atop" para aclarar SOLO los pixeles del sprite (sin tocar el
+  // resto de la escena) requiere un contexto con alpha real de fondo — el
+  // canvas principal ya está opaco en todos lados a esta altura del dibujo,
+  // así que source-atop ahí pintaría la pantalla entera, no la silueta.
+  const pbuf = document.createElement("canvas");
+  pbuf.width = 260; pbuf.height = 260;
+  const pctx = pbuf.getContext("2d");
   let SCALE = 1;
   function fit(){
     SCALE = Math.max(0.7, Math.min(1.6, Math.min((innerWidth-24)/VW, (innerHeight-24)/(VH+HUD))));
@@ -58,12 +67,14 @@
     ovHouseN:"assets/ov_house_n.png", ovChapel:"assets/ov_chapel.png",
     ovHouseE:"assets/ov_house_e.png", ovWell:"assets/ov_well.png",
     ovHouseSW:"assets/ov_house_sw.png", ovPews:"assets/ov_pews.png",
-    elder:"assets/inq_npc.png"
+    elderPortrait:"assets/inq_npc.png", elder:"assets/elder.png", padre:"assets/padre.png",
+    heroAtkF:"assets/hero_atk_f.png", heroAtkB:"assets/hero_atk_b.png", heroAtkS:"assets/hero_atk_s.png",
+    itemHammer:"assets/item_hammer.png", itemBow:"assets/item_bow.png", itemLantern:"assets/item_lantern.png"
   };
   // Full-screen story illustrations, loaded separately from sprites/tiles
   // because they're shown as one-off cutscenes (see showCutscene()) rather
   // than drawn every frame.
-  const cutsceneFiles = { witchRise:"assets/boss.jpg" };
+  const cutsceneFiles = { witchRise:"assets/boss.jpg", endingReveal:"assets/ending_reveal.jpg", endingSilence:"assets/ending_silence.jpg" };
   const cutsceneImg = {};
   const img = {};
   let loaded=0, need=Object.keys(files).length;
@@ -178,6 +189,13 @@
     grd.addColorStop(1,`rgba(${color},0)`);
     ctx.fillStyle=grd; ctx.fillRect(sx-r,sy-r,r*2,r*2);
   }
+  // NPCs que se dibujan con su propia luz en salas oscuras (ver uso junto a
+  // drawRimLitSprite en draw()) — por ahora solo el Padre en la capilla.
+  // `img:()=>img.padre` es una función (no el valor directo) porque este
+  // objeto se define antes de que loadAll() termine de poblar `img`.
+  const DARK_NPCS = {
+    capilla: [{x:856,y:600,h:145,flip:false,img:()=>img.padre}]
+  };
 
   // defaultFlags() centraliza el estado inicial — la usan tanto la partida
   // nueva (const game=...) como startGame() al reiniciar y loadGame() como
@@ -212,15 +230,30 @@
   }
   const player={x:620,y:520,dir:0,walk:false,frame:0,atk:0,using:0};
   let enemies=[], shots=[], drops=[], dialog=null, state="title", cam={x:0,y:0}, time=0, fade=0, pending=null;
-  let introSeen=false, cutsceneSeen=false, cutscene=null, pendingChoice=false;
+  let introSeen=false, cutsceneSeen=false, cutscene=null, pendingChoice=false, paused=false;
 
-  let AC=null;
+  let AC=null, masterGain=null;
+  function ensureAudio(){
+    if(AC) return;
+    try{
+      AC=new (window.AudioContext||window.webkitAudioContext)();
+      masterGain=AC.createGain();
+      const savedVol=parseFloat(localStorage.getItem("malleus_volume"));
+      masterGain.gain.value=isNaN(savedVol)?1:savedVol;
+      masterGain.connect(AC.destination);
+    }catch(e){}
+  }
+  function setVolume(v){
+    ensureAudio();
+    if(masterGain) masterGain.gain.value=v;
+    try{ localStorage.setItem("malleus_volume", String(v)); }catch(e){}
+  }
   function beep(f,d,t,v){
     try{
-      AC=AC||new (window.AudioContext||window.webkitAudioContext)();
+      ensureAudio();
       const o=AC.createOscillator(),g=AC.createGain();
       o.type=t||"square"; o.frequency.value=f; g.gain.value=v||.035;
-      o.connect(g); g.connect(AC.destination); o.start();
+      o.connect(g); g.connect(masterGain); o.start();
       g.gain.exponentialRampToValueAtTime(.0001,AC.currentTime+(d||.08));
       o.stop(AC.currentTime+(d||.08));
     }catch(e){}
@@ -255,7 +288,7 @@
   canvas.addEventListener("contextmenu",e=>e.preventDefault());
   canvas.style.touchAction="none"; // sin esto, un tap en el canvas también dispara scroll/zoom del navegador
   canvas.addEventListener("pointerdown",e=>{
-    if(state!=="play") return;
+    if(state!=="play"||paused) return;
     e.preventDefault();
     if(cutscene){ closeCutscene(); return; }
     if(dialog){
@@ -330,6 +363,8 @@
   if(IS_TOUCH) initTouchControls();
 
   function onKey(k){
+    if((k==="p"||k==="escape") && state==="play"){ togglePause(); return; }
+    if(paused) return;
     if(cutscene){ if("cz enter ".includes(k)||k==="enter") closeCutscene(); return; }
     if(dialog){
       if(pendingChoice){
@@ -417,10 +452,9 @@
     } else if(s.id==="chapel") warp("capilla",590,620);
     else if(s.id==="elder"){
       // El Encapuchado: otro Martillo, mucho mas viejo. Nunca da su nombre.
-      // Nota tecnica: usamos inq_npc.png SOLO como retrato de dialogo (abajo)
-      // porque el archivo tiene fondo pintado, no transparencia real — usarlo
-      // como sprite de mundo se veia como un rectangulo opaco flotando sobre
-      // la escena. En el mundo se dibuja con drawElderSilhouette() (vectorial).
+      // En el mundo usa assets/elder.png (sprite real, agregado 18/9). El
+      // retrato de dialogo sigue siendo inq_npc.png — es un dibujo de
+      // primer plano distinto a proposito, no el mismo sprite recortado.
       const PORTRAIT="assets/inq_npc.png";
       const act=storyAct();
       if(act<3){
@@ -559,14 +593,18 @@
       ? ["LA VERDAD QUEDA DICHA","Se rompe la cadena","El Obispo no te va a creer del todo. Alguien mas ya lo sabe."]
       : ["EL OFICIO SE CUMPLE","El ciclo sigue","El pozo esta sellado. Nadie pregunta de mas. Vos si."];
     clearSave(); // el arco terminó — un "Continuar" después de esto no debería reabrir un final ya jugado
-    setTimeout(()=>showOverlay("win",msg[0],msg[1],msg[2]),400);
+    setTimeout(()=>showCutscene(
+      kind==="reveal"?"endingReveal":"endingSilence",
+      kind==="reveal"?"Te vas del pueblo al amanecer con la carta en la mano. No sabés si el Obispo la va a leer entera.":"Volvés a la plaza. El pozo ya no habla. El pueblo duerme sin saber lo que sabés vos.",
+      ()=>showOverlay("win",msg[0],msg[1],msg[2])
+    ),400);
   }
 
   // Full-screen story cutscenes (currently just the witch reveal). These pause
   // gameplay the same way a dialog does, but render cutsceneImg[key] instead
   // of the room background. Dismissed the same way dialogs are (click/Z/Enter).
-  function showCutscene(key,text){ cutscene={key,text}; }
-  function closeCutscene(){ cutscene=null; }
+  function showCutscene(key,text,onClose){ cutscene={key,text,onClose}; }
+  function closeCutscene(){ const cb=cutscene&&cutscene.onClose; cutscene=null; if(cb) cb(); }
   function showOverlay(kind,k,title,sub){
     state=kind;
     const o=document.getElementById("overlay");
@@ -580,7 +618,7 @@
   function update(){
     time++;
     if(fade>0){ fade-=.08; if(fade<=.5&&pending) applyWarp(); if(fade<0) fade=0; }
-    if(state!=="play"||dialog||cutscene) return;
+    if(state!=="play"||dialog||cutscene||paused) return;
     let dx=0,dy=0;
     if(keys.a||keys.arrowleft) dx-=1;
     if(keys.d||keys.arrowright) dx+=1;
@@ -630,20 +668,17 @@
   // ANIMATOR — equivalente casero a un Animator/AnimatedSprite2D.
   //
   // Estados: "idle" | "walk". Direcciones: "front" | "back" | "side".
-  // Cada dirección declara si tiene 2 frames de arte REALES o si por ahora
-  // solo hay 1 (real:false). Cuando faltan frames reales, "walk" no falla
-  // silenciosamente ni queda rígido: cae a una animación PROCEDURAL
-  // (bamboleo vertical + inclinación lateral) hecha con transform de canvas,
-  // hasta que se sumen los sprites que faltan.
-  //
-  // Para agregar el segundo frame real de una dirección: dibujar
-  // assets/hero_b1.png / hero_s1.png distinto de su _0 y poner real:true acá.
+  // Las 3 direcciones ya tienen 2 frames de arte REALES (encargados y
+  // limpiados el 18/9 — ver docs/ART_TODO.md). El fallback procedural
+  // (bamboleo vertical + inclinación) sigue disponible por si alguna
+  // dirección se queda sin su segundo frame en el futuro: alcanza con
+  // volver a poner `real:false` en esa dirección para que se active solo.
   // =========================================================================
   const Animator = {
     directions: {
-      front: { frames:()=>[img.heroF0,img.heroF1], real:true  },
-      back:  { frames:()=>[img.heroB0,img.heroB1], real:false },
-      side:  { frames:()=>[img.heroS0,img.heroS1], real:false }
+      front: { frames:()=>[img.heroF0,img.heroF1], real:true },
+      back:  { frames:()=>[img.heroB0,img.heroB1], real:true },
+      side:  { frames:()=>[img.heroS0,img.heroS1], real:true }
     },
     dirNameFor(dirCode){
       if(dirCode===3) return "back";
@@ -669,8 +704,50 @@
       return {bob, skew};
     }
   };
-  function heroImg(){ return Animator.frame(); }
+  // Durante el golpe, heroImg() prioriza el frame de ataque dedicado
+  // (hero_atk_f/b/s) en vez del ciclo de caminata/idle del Animator — como
+  // todo el resto (drawSprite, drawPlayerRimLight) llama a heroImg() para
+  // saber "qué imagen es la del jugador ahora", alcanza con este único
+  // cambio para que el golpe se vea bien en cualquier lugar donde se dibuje.
+  function heroImg(){
+    if(player.atk){
+      if(player.dir===3) return img.heroAtkB;
+      if(player.dir===0) return img.heroAtkF;
+      return img.heroAtkS;
+    }
+    return Animator.frame();
+  }
 
+  // Rim-light del jugador para salas oscuras: dibuja el sprite en un buffer
+  // aparte (transparente de verdad) y usa "source-atop" ahí para aclarar
+  // SOLO los píxeles del personaje, respetando su silueta exacta. Probé
+  // antes con "screen" redibujando directo en el canvas principal — no
+  // sirve porque screen(x,x) para x muy oscuro (~0.03) da apenas ~0.06,
+  // imperceptible; y "source-atop" directo en el canvas principal tampoco
+  // sirve porque ya está opaco en todos lados a esta altura del dibujo
+  // (pintaría la pantalla entera, no la silueta). Por eso el buffer aparte.
+  // Generalizada a partir de la versión original (que solo servía al
+  // jugador) para que cualquier NPC parado en una sala oscura también sea
+  // visible — el Padre en la capilla se probó invisible sin esto, mismo
+  // motivo que el jugador antes del fix: nada se "ve" en una sala dark sin
+  // un aclarado propio, más allá del vignette ambiental.
+  function drawRimLitSprite(image,h,flip){
+    if(!image) return null;
+    const w=image.width/image.height*h;
+    const bw=pbuf.width, bh=pbuf.height;
+    const dx=(bw-w)/2, dy=(bh-h)/2;
+    pctx.clearRect(0,0,bw,bh);
+    pctx.save();
+    if(flip){ pctx.translate(dx+w,dy); pctx.scale(-1,1); pctx.drawImage(image,0,0,w,h); }
+    else pctx.drawImage(image,dx,dy,w,h);
+    pctx.restore();
+    pctx.globalCompositeOperation="source-atop";
+    pctx.fillStyle="rgba(255,205,140,.5)";
+    pctx.fillRect(0,0,bw,bh);
+    pctx.globalCompositeOperation="source-over";
+    return {w,h};
+  }
+  function drawPlayerRimLight(){ return drawRimLitSprite(heroImg(),124,player.dir===2); }
   function drawSprite(image,x,y,h,flip){
     if(!image) return;
     const w=image.width/image.height*h;
@@ -687,52 +764,6 @@
   function drawProp(image,x,y){
     if(!image) return;
     ctx.drawImage(image, Math.floor(x-cam.x), Math.floor(y-cam.y+HUD));
-  }
-  // El Encapuchado: dibujado a mano con canvas (no como imagen) porque el
-  // unico asset que tenemos de este personaje (assets/inq_npc.png) es un
-  // retrato con fondo opaco, no un sprite recortado — ver nota en interact().
-  function drawElderSilhouette(x,y){
-    const g=ctx, sx=x-cam.x, sy=y-cam.y+HUD;
-    g.save();
-    g.translate(sx,sy);
-    g.fillStyle="#1c2024";
-    g.beginPath();
-    g.moveTo(-26,4); g.quadraticCurveTo(-30,-70,0,-96);
-    g.quadraticCurveTo(30,-70,26,4);
-    g.quadraticCurveTo(14,-6,0,4);
-    g.quadraticCurveTo(-14,-6,-26,4);
-    g.fill();
-    g.fillStyle="#2a1416";
-    g.beginPath(); g.moveTo(-26,4); g.lineTo(-18,16); g.lineTo(-8,4); g.lineTo(4,18); g.lineTo(14,4); g.lineTo(26,4); g.lineTo(20,-4); g.lineTo(-20,-4); g.closePath(); g.fill();
-    g.fillStyle="#0c0e10";
-    g.beginPath(); g.ellipse(0,-72,13,15,0,0,Math.PI*2); g.fill();
-    g.fillStyle="#c4a15a";
-    g.beginPath(); g.arc(-4,-73,1.6,0,Math.PI*2); g.arc(4,-73,1.6,0,Math.PI*2); g.fill();
-    g.fillStyle="#e2a23a";
-    g.beginPath(); g.arc(20,10,4,0,Math.PI*2); g.fill();
-    g.restore();
-  }
-  // El Padre del pueblo: silueta clara (sotana gris, no capa negra) para que
-  // se distinga de un vistazo del Encapuchado. Sin capucha (cara visible,
-  // simple), con una estola oscura al cuello — unica seña distintiva.
-  function drawPadreSilhouette(x,y){
-    const g=ctx, sx=x-cam.x, sy=y-cam.y+HUD;
-    g.save();
-    g.translate(sx,sy);
-    g.fillStyle="#3a3630";
-    g.beginPath();
-    g.moveTo(-22,4); g.quadraticCurveTo(-26,-58,0,-88);
-    g.quadraticCurveTo(26,-58,22,4);
-    g.quadraticCurveTo(11,-6,0,4);
-    g.quadraticCurveTo(-11,-6,-22,4);
-    g.fill();
-    g.fillStyle="#241a16";
-    g.beginPath(); g.moveTo(-6,-70); g.lineTo(6,-70); g.lineTo(9,10); g.lineTo(-9,10); g.closePath(); g.fill();
-    g.fillStyle="#d8bfa0";
-    g.beginPath(); g.ellipse(0,-76,12,13,0,0,Math.PI*2); g.fill();
-    g.fillStyle="#050403";
-    g.beginPath(); g.arc(-4,-77,1.3,0,Math.PI*2); g.arc(4,-77,1.3,0,Math.PI*2); g.fill();
-    g.restore();
   }
 
   function draw(){
@@ -756,10 +787,10 @@
       actors.push({z:790, draw:()=>drawSprite(img.merc,1280,790,128,false)});
       // El Encapuchado only shows up once the story has advanced past Acto 1
       // (see story.act in interact()/spawnRoom-adjacent logic below).
-      if(storyAct()>=2) actors.push({z:560, draw:()=>drawElderSilhouette(900,560)});
+      if(storyAct()>=2) actors.push({z:560, draw:()=>drawSprite(img.elder,900,560,150,false)});
     }
     if(game.room==="capilla"){
-      actors.push({z:600, draw:()=>drawPadreSilhouette(856,600)});
+      actors.push({z:600, draw:()=>drawSprite(img.padre,856,600,145,false)});
     }
     enemies.forEach(e=>{
       if(!e.alive) return;
@@ -785,7 +816,7 @@
         lx=player.dir===1?-lunge:player.dir===2?lunge:0;
         ly=player.dir===3?-lunge:player.dir===0?lunge:0;
       }
-      drawSprite(heroImg(), player.x+lx, player.y+ly, 124, player.dir===1);
+      drawSprite(heroImg(), player.x+lx, player.y+ly, 124, player.dir===2);
       if(player.atk){
         const t=1-player.atk/14;
         const ang=player.dir===0?Math.PI/2:player.dir===3?-Math.PI/2:player.dir===1?Math.PI:0;
@@ -812,16 +843,59 @@
     shots.forEach(s=>{ g.fillStyle=s.friendly?"#e8dcc8":"#6a8a4a"; g.fillRect(s.x-cam.x-2,s.y-cam.y+HUD-2,5,5); });
 
     const R=room();
-    const lx=player.x-cam.x, ly=player.y-cam.y+HUD-30;
+    // Centro del círculo de luz: antes estaba a -30 de player.y (altura de
+    // la mano/linterna), así que la cabeza y el torso quedaban fuera de la
+    // zona bien iluminada y se fundían con la oscuridad. El sprite mide
+    // ~124px de alto con los pies en player.y, así que el centro real del
+    // cuerpo está más cerca de -62.
+    const lx=player.x-cam.x, ly=player.y-cam.y+HUD-62;
     if(R.dark){
       const rad=game.item==="lantern"&&game.flags.lantern?210:game.flags.lantern?120:70;
-      const grd=g.createRadialGradient(lx,ly,20,lx,ly,rad);
-      grd.addColorStop(0,"rgba(0,0,0,0)"); grd.addColorStop(.45,"rgba(0,0,0,.35)"); grd.addColorStop(1,"rgba(0,0,0,.88)");
+      const grd=g.createRadialGradient(lx,ly,36,lx,ly,rad);
+      grd.addColorStop(0,"rgba(0,0,0,0)"); grd.addColorStop(.45,"rgba(0,0,0,.28)"); grd.addColorStop(1,"rgba(0,0,0,.82)");
       g.fillStyle=grd; g.fillRect(0,HUD,VW,VH);
     } else {
       const grd=g.createRadialGradient(lx,ly,80,lx,ly,420);
       grd.addColorStop(0,"rgba(0,0,0,0)"); grd.addColorStop(1,"rgba(0,0,0,.38)");
       g.fillStyle=grd; g.fillRect(0,HUD,VW,VH);
+    }
+    // Halo ambiente + aclarado del propio sprite, dibujados DESPUÉS del
+    // vignette a propósito — si fuera antes, el vignette los tapa igual
+    // que al personaje (fue el bug real: no era el radio de luz, era el
+    // orden de dibujo). El halo ambiente por sí solo ilumina el piso pero
+    // NO aclara la túnica (~47/255 de brillo promedio) — drawPlayerRimLight()
+    // (ver definición junto a drawSprite) es lo que realmente aclara al
+    // personaje, respetando su silueta exacta vía un buffer aparte.
+    if(R.dark && game.flags.lantern && game.item==="lantern"){
+      const hx=player.x-cam.x, hy=player.y-cam.y+HUD-55;
+      const hgrd=g.createRadialGradient(hx,hy,0,hx,hy,90);
+      hgrd.addColorStop(0,"rgba(255,205,130,.45)");
+      hgrd.addColorStop(1,"rgba(255,205,130,0)");
+      g.fillStyle=hgrd; g.fillRect(hx-90,hy-90,180,180);
+
+      const info=drawPlayerRimLight();
+      if(info){
+        const dx=player.x-cam.x-pbuf.width/2;
+        const dy=(player.y-cam.y+HUD)-(pbuf.height+info.h)/2;
+        g.drawImage(pbuf,dx,dy);
+      }
+    }
+    // NPCs con su propia luz en salas oscuras (ej. el Padre, siempre parado
+    // junto a una vela) — a diferencia del jugador, esto NO depende de que
+    // el jugador tenga la linterna: son ellos los que tienen su propia luz,
+    // no dependen del visitante. Mismo motivo por el que hizo falta esto:
+    // sin rim-light, cualquier sprite en una sala "dark" se vuelve invisible
+    // bajo el vignette, no solo el jugador (se confirmó jugando: el Padre
+    // desaparecía por completo en la capilla sin este agregado).
+    if(R.dark){
+      (DARK_NPCS[game.room]||[]).forEach(npc=>{
+        const info=drawRimLitSprite(npc.img(), npc.h, npc.flip);
+        if(info){
+          const dx=npc.x-cam.x-pbuf.width/2;
+          const dy=(npc.y-cam.y+HUD)-(pbuf.height+info.h)/2;
+          g.drawImage(pbuf,dx,dy);
+        }
+      });
     }
     if(fade>0){ g.fillStyle="rgba(0,0,0,"+Math.min(1,fade*1.4)+")"; g.fillRect(0,HUD,VW,VH); }
 
@@ -852,7 +926,9 @@
   function questText(){
     const act=storyAct();
     if(act===1) return "Encargo · Obispo — investigá el pozo del pueblo";
-    if(act===2) return "Encargo · Obispo — encontrá la linterna y bajá a la cripta";
+    if(act===2) return game.flags.lantern
+      ? "Encargo · Obispo — bajá a la cripta con la linterna"
+      : "Encargo · Obispo — encontrá la linterna y bajá a la cripta";
     if(act===3) return "Encargo · Padre — sellá el pozo con el martillo";
     if(act===4) return "Encargo · nadie te dijo que hacer con esto";
     return game.flags.confessed ? "Encargo · cumplido" : "Encargo · hablá con el Padre";
@@ -890,7 +966,7 @@
       player.x=save.px; player.y=save.py; player.dir=save.dir; player.atk=0;
       introSeen=true; cutsceneSeen=true; // ya vio la intro y el cutscene en la partida original
       spawnRoom(); state="play";
-      try{AC=AC||new (window.AudioContext||window.webkitAudioContext)(); AC.resume();}catch(e){}
+      try{ensureAudio(); AC.resume();}catch(e){}
       return;
     }
     game.room="plaza"; game.hp=game.maxHp; game.invuln=0;
@@ -899,7 +975,7 @@
     player.x=rooms.plaza.spawn.x; player.y=rooms.plaza.spawn.y; player.dir=0; player.atk=0;
     cutsceneSeen=false;
     spawnRoom(); state="play";
-    try{AC=AC||new (window.AudioContext||window.webkitAudioContext)(); AC.resume();}catch(e){}
+    try{ensureAudio(); AC.resume();}catch(e){}
     introSeen=true;
     openDialog("Carta del Obispo","Roma manda martillos, no explicaciones. Este pueblo reportó un pozo que habla de noche. El Padre local te va a decir qué hacer. Hacé lo que diga. No preguntes por qué el manual dice lo que dice.");
   }
@@ -911,5 +987,29 @@
     btnContinue.onclick=()=>{ if(IS_TOUCH) tryLockLandscape(); startGame(true); };
     document.getElementById("btnGo").textContent="Nueva partida"; // ya hay un save — aclarar que este botón lo pisa
   }
+
+  // --- Menú de pausa -------------------------------------------------
+  // Pausar no cierra diálogos ni cutscenes activos, solo congela update()
+  // (ver el guard `||paused` agregado ahí) — quedan visibles debajo del
+  // menú de pausa, que tiene z-index más alto. Volumen persiste en
+  // localStorage vía setVolume() (ver junto a ensureAudio()).
+  const pauseMenuEl=document.getElementById("pauseMenu");
+  function togglePause(){
+    paused=!paused;
+    pauseMenuEl.classList.toggle("show",paused);
+  }
+  document.getElementById("btnPause").onclick=()=>{ if(state==="play") togglePause(); };
+  document.getElementById("btnResume").onclick=togglePause;
+  document.getElementById("btnRestart").onclick=()=>{
+    if(confirm("¿Reiniciar la partida desde el principio? Se pierde el progreso actual.")){
+      paused=false; pauseMenuEl.classList.remove("show");
+      startGame(false);
+    }
+  };
+  const volSlider=document.getElementById("volSlider");
+  const savedVol=parseFloat(localStorage.getItem("malleus_volume"));
+  volSlider.value=isNaN(savedVol)?1:savedVol;
+  volSlider.oninput=()=>setVolume(parseFloat(volSlider.value));
+
   loadAll(()=>loop());
 })();

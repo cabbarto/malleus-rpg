@@ -61,6 +61,21 @@
   #rotateOverlay .icon{font-size:52px;margin-bottom:14px}
   #rotateOverlay .k{color:#c4a15a;letter-spacing:.3em;font-size:11px;margin-bottom:6px}
   #rotateOverlay p{color:#9a8b74;max-width:280px;font-style:italic}
+
+  /* Botón de pausa: siempre visible arriba a la derecha del HUD (también
+     útil en touch, que no tiene tecla P/Escape). */
+  #btnPause{position:absolute;top:8px;right:12px;z-index:20;
+    width:34px;height:30px;border:1px solid #3a3024;background:#120e0bcc;
+    color:#c4a15a;font:14px Georgia,serif;cursor:pointer;border-radius:3px}
+  #pauseMenu{display:none;position:absolute;inset:0;z-index:30;
+    background:#050403ee;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px}
+  #pauseMenu.show{display:flex}
+  #pauseMenu h2{margin:0;letter-spacing:.2em;color:#c4a15a;font-size:22px}
+  #pauseMenu button{background:#120e0b;color:#e8dcc8;border:1px solid #c4a15a;
+    padding:10px 26px;font:15px Georgia,serif;cursor:pointer;min-width:200px}
+  #pauseMenu button:hover{background:#1c1712}
+  #pauseMenu .volrow{display:flex;align-items:center;gap:10px;color:#9a8b74;font-size:13px}
+  #pauseMenu input[type=range]{width:160px}
 </style>
 </head>
 <body>
@@ -71,6 +86,13 @@
 </div>
 <div id="wrap"><div id="frame">
 <canvas id="c"></canvas>
+<button id="btnPause" title="Pausa (P)">❚❚</button>
+<div id="pauseMenu">
+  <h2>PAUSA</h2>
+  <button id="btnResume">Reanudar</button>
+  <button id="btnRestart">Reiniciar partida</button>
+  <div class="volrow">🔊<input type="range" id="volSlider" min="0" max="1" step="0.05" value="1"></div>
+</div>
 <div id="ui">
   <div id="dialog"><img class="portrait" id="dportrait"/><div class="body"><div class="who" id="dwho"></div><div id="dtxt"></div></div></div>
   <div id="overlay">

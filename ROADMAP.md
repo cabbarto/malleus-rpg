@@ -22,11 +22,11 @@ Quedó afuera de esta fase, para más adelante:
 ## Fase 2 — Sistemas base que van a hacer falta para todo lo demás
 
 - [x] **Guardado** — `localStorage`, un slot, ver `docs/ARCHITECTURE.md`.
-- [ ] **Menú de pausa** simple (reanudar / reiniciar / volumen).
+- [x] **Menú de pausa** — `P`/`Escape` o botón en pantalla, con reanudar,
+  reiniciar (con confirmación) y volumen persistente. Ver `docs/ARCHITECTURE.md`.
 - [ ] Sistema de diálogo con **opciones** (no solo texto lineal) — hoy existe
   una versión ad-hoc (`pendingChoice`) solo para el final del juego; si
   aparece un segundo punto de elección en la historia, generalizarlo.
-
 ## Fase 3 — Expansión de mundo (2-3 pueblos)
 
 - [ ] Mapa de overworld conectando pueblos (cada uno con su propio Padre y
@@ -51,10 +51,8 @@ sistema de party al estilo Golden Sun.
 
 ## Fase 5 — Pulido
 
-- [ ] **Arte faltante: segundo frame de caminata para espalda y costado**
-  (`hero_b1.png`, `hero_s1.png` son hoy copias idénticas de `hero_b0`/`hero_s0`
-  — el `Animator` ya tiene el fallback procedural para disimularlo, pero la
-  animación real requiere dibujar estos dos frames con la pose distinta).
+- [x] ~~Arte faltante: segundo frame de caminata~~ — resuelto 18/9, ver
+  `docs/ART_TODO.md` y la sección de Animator en `docs/ARCHITECTURE.md`.
 - [ ] Balance de combate (HP/daño/velocidad de enemigos — todo hardcodeado
   hoy en `spawnRoom()`, fácil de tunear pero nunca testeado a fondo).
 - [ ] Feel: cámara, screen shake en golpes, mejor feedback de daño.

@@ -129,6 +129,60 @@ carga vieja). Si agregás un flag nuevo, solo hace falta sumarlo ahí.
 jugado no debería poder "continuarse". No hay más lógica de borrado de save
 más allá de eso y de arrancar una partida nueva desde el título.
 
+## Iluminación en salas oscuras (`drawRimLitSprite`)
+
+Bug real encontrado probando el juego con Playwright (Chromium headless,
+capturas reales — no alcanzaba con leer el código): en capilla/cripta con
+la linterna encendida, el personaje se veía como una mancha casi invisible
+aunque el círculo de luz ambiental fuera grande. Tres intentos, en orden,
+hasta encontrar el que realmente funciona (los primeros dos quedan como
+comentario en el código para que nadie los reintente):
+
+1. **Recentrar el círculo de luz** (`ly = player.y-cam.y+HUD-62` en vez de
+   `-30`) — necesario pero no alcanza solo.
+2. **Halo ambiente alrededor del jugador** — medido con muestreo de píxeles:
+   sí ilumina el piso (9,8,7 → 138,111,74), pero la túnica del sprite
+   (~47/255 de brillo promedio) no "refleja" esa luz — comparación lado a
+   lado mostró cero cambio en el personaje mismo.
+3. **Redibujar el sprite en modo `screen` sobre sí mismo** — matemáticamente
+   no sirve para píxeles muy oscuros: `screen(x,x) ≈ 2x` para x chico, así
+   que 0.03 de brillo apenas sube a 0.06. Imperceptible.
+4. **`drawPlayerRimLight()` (la que quedó):** dibuja el sprite en
+   `pbuf`/`pctx`, un `<canvas>` offscreen aparte, y ahí sí usa
+   `globalCompositeOperation="source-atop"` para aclarar SOLO los píxeles
+   con alpha>0 del sprite. No funciona directo en el canvas principal
+   porque a esa altura del dibujo ya está opaco en todos lados (source-atop
+   pintaría la pantalla entera, no la silueta) — por eso hace falta el
+   buffer aparte, transparente de verdad.
+
+Se dibuja DESPUÉS del vignette de oscuridad (`R.dark`), no antes — ese fue
+el otro medio-bug: si se dibuja antes, el vignette lo vuelve a tapar. Solo
+aplica al jugador (los enemigos se quedan sin iluminar a propósito, para
+que sigan dando miedo en la oscuridad).
+
+**Generalizada a `drawRimLitSprite(image,h,flip)` (18/9):** al integrar el
+sprite real del Padre, probando en capilla se confirmó que desaparecía
+igual que el jugador antes del fix — mismo motivo, ningún sprite se salva
+del vignette sin esto. `drawPlayerRimLight()` ahora es un wrapper de una
+sola línea sobre la función general. `DARK_NPCS` (junto a `GLOWS`) lista
+qué NPCs se iluminan solos en qué sala — a diferencia del jugador, esto NO
+depende de tener la linterna equipada: son ellos los que tienen su propia
+luz. Agregar un NPC nuevo a una sala oscura = sumarlo a `DARK_NPCS`, nada más.
+
+## Menú de pausa
+
+`paused` (bool) — mismo patrón que `dialog`/`cutscene`: `update()` corta
+temprano si está en `true` (ver el guard con `||paused`). A propósito NO
+cierra diálogos/cutscenes activos al pausar — quedan congelados debajo del
+menú, que tiene z-index más alto, y siguen donde estaban al reanudar.
+
+Se activa con `P`/`Escape` (`onKey()`, chequeo al principio de la función,
+antes que cualquier otra tecla) o el botón `#btnPause` (siempre visible,
+pensado para touch que no tiene teclado). El volumen usa un `GainNode`
+maestro (`masterGain` en `ensureAudio()`) — antes cada `beep()` se conectaba
+directo a `AC.destination`, así que no había forma de bajar el volumen
+global sin esto. Persiste en `localStorage` (`malleus_volume`).
+
 ## Cómo agregar contenido narrativo sin romper nada
 
 1. Nuevo flag → agregarlo al objeto inicial en `game.flags` con su default.
