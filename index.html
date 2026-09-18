@@ -2,8 +2,96 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="content-placeholder"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>MALLEUS — Oficio</title>
+<style>
+  html,body{margin:0;height:100%;background:#050403;overflow:hidden;color:#e8dcc8;font-family:Georgia,serif}
+  #wrap{height:100%;display:flex;align-items:center;justify-content:center}
+  #frame{position:relative;box-shadow:0 0 0 2px #3a3024,0 0 0 8px #120e0b,0 24px 80px #000}
+  canvas{display:block}
+  #ui{position:absolute;inset:0;pointer-events:none}
+  #ui *{pointer-events:auto}
+  #dialog{display:none;position:absolute;left:8%;right:8%;bottom:10%;
+    background:#0c0a08f2;border:2px solid #c4a15a;padding:14px 16px;min-height:84px;font-size:16px;line-height:1.45;
+    display:none;align-items:flex-start;gap:14px}
+  #dialog.show{display:flex}
+  #dialog .portrait{width:64px;height:64px;object-fit:cover;object-position:top center;border:1px solid #5a4a32;flex:none;display:none}
+  #dialog .portrait.show{display:block}
+  #dialog .body{flex:1;min-width:0}
+  #dialog .who{color:#c4a15a;letter-spacing:.2em;font-size:11px;margin-bottom:6px}
+  #overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
+    text-align:center;background:#050403 center/cover no-repeat;padding:0 28px 32px}
+  #overlay.play{display:none}
+  #overlay::before{content:"";position:absolute;inset:0;background:linear-gradient(to top,#050403 18%,#05040388 52%,transparent)}
+  #overlay>*{position:relative}
+  #overlay .k{color:#c4a15a;letter-spacing:.36em;font-size:11px}
+  #overlay h1{font-size:54px;font-weight:400;letter-spacing:.12em;margin:6px 0 8px}
+  #overlay p{color:#9a8b74;max-width:540px;font-style:italic;margin-bottom:16px}
+  #overlay button{background:#1a1410;color:#e8dcc8;border:1px solid #5a4a32;padding:10px 22px;font-family:Georgia,serif;font-size:15px;cursor:pointer}
+  #overlay button:hover{border-color:#c4a15a;color:#fff}
+  #overlay .help{margin-top:10px;font-size:12px;color:#6e6354;line-height:1.5}
+  .help-touch{display:none}
+
+  /* Controles táctiles — solo se muestran si game.js detecta un dispositivo
+     touch-primero (ver IS_TOUCH en src/game.js). En desktop este bloque
+     entero queda display:none y no ocupa espacio ni intercepta clics. */
+  #touchControls{position:absolute;inset:0;pointer-events:none;display:none}
+  body.is-touch #touchControls{display:block}
+  body.is-touch .help{display:none} /* la ayuda de teclado no aplica en touch */
+  body.is-touch .help-touch{display:block} /* va después de la línea de arriba: misma especificidad, gana la última */
+  #joystick{position:absolute;left:22px;bottom:22px;width:112px;height:112px;border-radius:50%;
+    background:#14100c73;border:2px solid #c4a15a80;pointer-events:auto;touch-action:none}
+  #joystickNub{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;
+    border-radius:50%;background:#c4a15ac0;border:2px solid #0c0a08}
+  #touchButtons{position:absolute;right:18px;bottom:18px;display:flex;align-items:flex-end;gap:10px;pointer-events:none}
+  .tbtn{pointer-events:auto;touch-action:none;width:62px;height:62px;border-radius:50%;
+    background:#14100c73;border:2px solid #c4a15a80;color:#e8dcc8;font:12px Georgia,serif;
+    display:flex;align-items:center;justify-content:center;text-align:center;user-select:none;-webkit-user-select:none}
+  #btnTalk{width:52px;height:52px;align-self:center;font-size:11px}
+  #btnAttack{font-size:20px}
+
+  /* Aviso de "girá el teléfono" — solo en touch + portrait (ver JS: se
+     togglea la clase is-portrait con matchMedia("(orientation: portrait)")).
+     En desktop nunca aparece aunque la ventana sea angosta y alta. */
+  #rotateOverlay{display:none;position:fixed;inset:0;z-index:9999;background:#050403;
+    color:#e8dcc8;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;padding:24px;font-family:Georgia,serif}
+  body.is-touch.is-portrait #rotateOverlay{display:flex}
+  body.is-touch.is-portrait #wrap{visibility:hidden} /* evita ver el canvas achicado atrás del aviso */
+  #rotateOverlay .icon{font-size:52px;margin-bottom:14px}
+  #rotateOverlay .k{color:#c4a15a;letter-spacing:.3em;font-size:11px;margin-bottom:6px}
+  #rotateOverlay p{color:#9a8b74;max-width:280px;font-style:italic}
+</style>
 </head>
-<body>PLACEHOLDER</body>
+<body>
+<div id="rotateOverlay">
+  <div class="icon">📱↻</div>
+  <div class="k">GIRÁ EL TELÉFONO</div>
+  <p>MALLEUS se juega en horizontal. Rotá el celular para entrar al pueblo.</p>
+</div>
+<div id="wrap"><div id="frame">
+<canvas id="c"></canvas>
+<div id="ui">
+  <div id="dialog"><img class="portrait" id="dportrait"/><div class="body"><div class="who" id="dwho"></div><div id="dtxt"></div></div></div>
+  <div id="overlay">
+    <div class="k">ACCIÓN RPG</div>
+    <h1>MALLEUS</h1>
+    <p>El pueblo no te quiere. El pozo ya habló. Tú eres el martillo.</p>
+    <button id="btnGo">Entrar al pueblo</button>
+    <button id="btnContinue" style="display:none;margin-top:8px">Continuar</button>
+    <div class="help">WASD mover · clic izquierdo martillo · clic derecho objeto<br>rueda cambia objeto · clic cerca habla / abre</div>
+    <div class="help help-touch">Joystick para moverte · ⚒ ataca o interactúa · 🕯 usa objeto · HABLAR abre diálogo</div>
+  </div>
+</div>
+<div id="touchControls">
+  <div id="joystick"><div id="joystickNub"></div></div>
+  <div id="touchButtons">
+    <div class="tbtn" id="btnTalk">HABLAR</div>
+    <div class="tbtn" id="btnUse">🕯</div>
+    <div class="tbtn" id="btnAttack">⚒</div>
+  </div>
+</div>
+</div></div>
+<script src="src/game.js"></script>
+</body>
 </html>
