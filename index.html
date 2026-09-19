@@ -40,10 +40,12 @@
   body.is-touch .help{display:none} /* la ayuda de teclado no aplica en touch */
   body.is-touch .help-touch{display:block} /* va después de la línea de arriba: misma especificidad, gana la última */
   #joystick{position:absolute;left:22px;bottom:22px;width:112px;height:112px;border-radius:50%;
-    background:#14100c73;border:2px solid #c4a15a80;pointer-events:auto;touch-action:none}
+    background:#14100c73;border:2px solid #c4a15a80;pointer-events:auto;touch-action:none;
+    transform:scale(var(--uiscale,1));transform-origin:bottom left}
   #joystickNub{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;
     border-radius:50%;background:#c4a15ac0;border:2px solid #0c0a08}
-  #touchButtons{position:absolute;right:18px;bottom:18px;display:flex;align-items:flex-end;gap:10px;pointer-events:none}
+  #touchButtons{position:absolute;right:18px;bottom:18px;display:flex;align-items:flex-end;gap:10px;pointer-events:none;
+    transform:scale(var(--uiscale,1));transform-origin:bottom right}
   .tbtn{pointer-events:auto;touch-action:none;width:62px;height:62px;border-radius:50%;
     background:#14100c73;border:2px solid #c4a15a80;color:#e8dcc8;font:12px Georgia,serif;
     display:flex;align-items:center;justify-content:center;text-align:center;user-select:none;-webkit-user-select:none}
@@ -65,6 +67,7 @@
   /* Botón de pausa: siempre visible arriba a la derecha del HUD (también
      útil en touch, que no tiene tecla P/Escape). */
   #btnPause{position:absolute;top:8px;right:12px;z-index:20;
+    transform:scale(var(--uiscale,1));transform-origin:top right;
     width:34px;height:30px;border:1px solid #3a3024;background:#120e0bcc;
     color:#c4a15a;font:14px Georgia,serif;cursor:pointer;border-radius:3px}
   #pauseMenu{display:none;position:absolute;inset:0;z-index:30;

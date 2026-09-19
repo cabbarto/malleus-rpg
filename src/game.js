@@ -13,12 +13,23 @@
   const pctx = pbuf.getContext("2d");
   let SCALE = 1;
   function fit(){
-    SCALE = Math.max(0.7, Math.min(1.6, Math.min((innerWidth-24)/VW, (innerHeight-24)/(VH+HUD))));
+    // Antes había un mínimo artificial de 0.7 — en un celular chico en
+    // horizontal, el espacio disponible puede pedir una escala MENOR a
+    // eso, y forzarla a 0.7 hacía que el juego se dibujara más grande de
+    // lo que entra en pantalla (exactamente "no se ve completo el
+    // display" que se reportó jugando en un celular real).
+    SCALE = Math.max(0.35, Math.min(1.6, Math.min((innerWidth-24)/VW, (innerHeight-24)/(VH+HUD))));
     canvas.width = VW; canvas.height = VH+HUD;
     canvas.style.width = Math.floor(VW*SCALE)+"px";
     canvas.style.height = Math.floor((VH+HUD)*SCALE)+"px";
     const fr=document.getElementById("frame");
     fr.style.width=canvas.style.width; fr.style.height=canvas.style.height;
+    // Los controles táctiles (joystick, botones, pausa) tienen tamaño fijo
+    // en CSS — sin esto, en una pantalla chica (canvas escalado hacia
+    // abajo) quedan enormes en comparación, tapando media pantalla. Esta
+    // variable CSS los escala junto con el canvas (ver index.html, usa
+    // var(--uiscale) en transform:scale()).
+    fr.style.setProperty("--uiscale", SCALE);
   }
   fit(); addEventListener("resize", fit);
   addEventListener("orientationchange", fit); // en algunos navegadores viejos "resize" no alcanza al rotar
@@ -247,7 +258,84 @@
     ensureAudio();
     if(masterGain) masterGain.gain.value=v;
     try{ localStorage.setItem("malleus_volume", String(v)); }catch(e){}
+    setMusicVolume(v);
   }
+
+  // =========================================================================
+  // MÚSICA — 4 pistas en MP3 (renderizadas desde MIDI compuesto aparte, ver
+  // /mnt/user-data/outputs/*.mid en la conversación de diseño de audio) vía
+  // <audio> normales, no Web Audio — más simple para loop+crossfade y no
+  // hace falta decodificar el buffer entero antes de poder sonar.
+  // playMusic() nunca corta en seco: cruza (fade) la pista vieja con la
+  // nueva en MUSIC_FADE_MS. Volumen ligado al mismo slider que el SFX
+  // (ver setVolume arriba) — un solo control para todo el audio del juego.
+  // =========================================================================
+  const MUSIC_FILES = {
+    titulo: "assets/music/titulo.mp3",
+    pueblo_en_paz: "assets/music/pueblo_en_paz.mp3",
+    ambiente_pueblo: "assets/music/ambiente_pueblo.mp3",
+    combate: "assets/music/combate.mp3"
+  };
+  const MUSIC_FADE_MS = 1400;
+  const musicEls = {};
+  let currentMusicKey = null, musicVolume = 1;
+
+  function initMusic(){
+    for(const [k,src] of Object.entries(MUSIC_FILES)){
+      const a = new Audio(src);
+      a.loop = true; a.volume = 0; a.preload = "auto";
+      musicEls[k] = a;
+    }
+  }
+  function setMusicVolume(v){
+    musicVolume = v;
+    if(currentMusicKey && musicEls[currentMusicKey]) musicEls[currentMusicKey].volume = v;
+  }
+  function playMusic(key){
+    if(currentMusicKey===key || !musicEls[key]) return;
+    const prevKey = currentMusicKey;
+    currentMusicKey = key;
+    const target = musicEls[key];
+    target.play().catch(()=>{}); // el navegador puede rechazar sin gesto del usuario — no es fatal, se reintenta en la próxima interacción
+    const prevEl = prevKey ? musicEls[prevKey] : null;
+    const prevStartVol = prevEl ? prevEl.volume : 0;
+    const t0 = performance.now();
+    (function step(){
+      const t = Math.min(1, (performance.now()-t0)/MUSIC_FADE_MS);
+      if(prevEl) prevEl.volume = prevStartVol*(1-t);
+      target.volume = musicVolume*t;
+      if(t<1) requestAnimationFrame(step);
+      else if(prevEl) prevEl.pause();
+    })();
+  }
+  // La sala manda qué ambiente suena de fondo — la plaza cambia de tema
+  // según si el pozo ya está sellado (pueblo_en_paz) o no
+  // (ambiente_pueblo, la versión "corrompida" de la misma melodía — ver
+  // docs/ARCHITECTURE.md). El resto de las salas usan siempre la versión
+  // tensa: nunca hay paz de verdad en el bosque/capilla/cripta.
+  function ambientKeyForRoom(){
+    if(game.room==="plaza") return game.flags.wellSealed ? "pueblo_en_paz" : "ambiente_pueblo";
+    return "ambiente_pueblo";
+  }
+  // Se llama al cambiar de sala Y periódicamente desde update() (ver
+  // musicCheckTimer) porque el combate puede empezar/terminar sin que el
+  // jugador cambie de sala — hay que reaccionar a que aparezcan o mueran
+  // enemigos, no solo a los warps.
+  function updateRoomMusic(){
+    if(state!=="play") return;
+    const hasEnemies = enemies.some(e=>e.alive);
+    playMusic(hasEnemies ? "combate" : ambientKeyForRoom());
+  }
+  // Autoplay: los navegadores bloquean sonido sin gesto del usuario. Se
+  // intenta arrancar la música de título en la primera interacción
+  // cualquiera sea (mover no sirve, pero un click/tecla sí) mientras
+  // seguimos en la pantalla de título.
+  function tryStartTitleMusic(){
+    if(state==="title") playMusic("titulo");
+  }
+  document.addEventListener("pointerdown", tryStartTitleMusic, {once:true});
+  document.addEventListener("keydown", tryStartTitleMusic, {once:true});
+
   function beep(f,d,t,v){
     try{
       ensureAudio();
@@ -421,6 +509,7 @@
       cutsceneSeen=true;
       showCutscene("witchRise","Algo se levanta del agua antes de que bajes del todo. No parece tener prisa.");
     }
+    updateRoomMusic();
     saveGame();
   }
 
@@ -514,7 +603,7 @@
     });
     const s=hitSpot();
     if(s && s.id==="well" && game.flags.witchDead && !game.flags.wellSealed){
-      game.flags.wellSealed=true; sfx.win(); saveGame();
+      game.flags.wellSealed=true; sfx.win(); saveGame(); updateRoomMusic();
       setTimeout(()=>showOverlay("win","EL POZO SE CIERRA","Oficio cumplido","La pactada ya no habla desde el agua. El pueblo te mira igual de mal."),600);
     }
   }
@@ -619,6 +708,7 @@
     time++;
     if(fade>0){ fade-=.08; if(fade<=.5&&pending) applyWarp(); if(fade<0) fade=0; }
     if(state!=="play"||dialog||cutscene||paused) return;
+    if(time%30===0) updateRoomMusic(); // el combate puede empezar/terminar sin cambiar de sala
     let dx=0,dy=0;
     if(keys.a||keys.arrowleft) dx-=1;
     if(keys.d||keys.arrowright) dx+=1;
@@ -967,6 +1057,7 @@
       introSeen=true; cutsceneSeen=true; // ya vio la intro y el cutscene en la partida original
       spawnRoom(); state="play";
       try{ensureAudio(); AC.resume();}catch(e){}
+      updateRoomMusic();
       return;
     }
     game.room="plaza"; game.hp=game.maxHp; game.invuln=0;
@@ -976,6 +1067,7 @@
     cutsceneSeen=false;
     spawnRoom(); state="play";
     try{ensureAudio(); AC.resume();}catch(e){}
+    updateRoomMusic();
     introSeen=true;
     openDialog("Carta del Obispo","Roma manda martillos, no explicaciones. Este pueblo reportó un pozo que habla de noche. El Padre local te va a decir qué hacer. Hacé lo que diga. No preguntes por qué el manual dice lo que dice.");
   }
@@ -1010,6 +1102,8 @@
   const savedVol=parseFloat(localStorage.getItem("malleus_volume"));
   volSlider.value=isNaN(savedVol)?1:savedVol;
   volSlider.oninput=()=>setVolume(parseFloat(volSlider.value));
+  initMusic();
+  musicVolume=isNaN(savedVol)?1:savedVol;
 
   loadAll(()=>loop());
 })();
